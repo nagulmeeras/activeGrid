@@ -314,6 +314,7 @@ object Main extends App {
   implicit val scalingGroupFormat = jsonFormat(ScalingGroup.apply, "id", "name", "launchConfigurationName", "status", "availabilityZones", "instanceIds", "loadBalancerNames", "tags", "desiredCapacity", "maxCapacity", "minCapacity")
   implicit val apmServerDetailsFormat = jsonFormat(APMServerDetails.apply, "id", "name", "serverUrl", "monitoredSite", "provider", "headers")
   implicit val site1Format = jsonFormat(Site1.apply, "id", "siteName", "instances", "reservedInstanceDetails", "filters", "loadBalancers", "scalingGroups", "groupsList")
+
   implicit object SiteDeltaStatusFormat extends RootJsonFormat[SiteDeltaStatus] {
     override def write(obj: SiteDeltaStatus): JsValue = {
       JsString(obj.deltaStatus.toString)
@@ -326,6 +327,7 @@ object Main extends App {
       }
     }
   }
+
   implicit val siteDeltaFormat = jsonFormat(SiteDelta.apply, "siteId", "deltaStatus", "addedInstances", "deletedInstances")
 
   def appSettingServiceRoutes = post {
@@ -850,7 +852,7 @@ object Main extends App {
   }
 
 
-  def catalogRoutes : Route = pathPrefix("catalog") {
+  def catalogRoutes: Route = pathPrefix("catalog") {
     path("images" / "view") {
       get {
         val getImages: Future[Page[ImageInfo]] = Future {
@@ -969,7 +971,7 @@ object Main extends App {
     }
   }
 
-  def nodeRoutes : Route = pathPrefix("node") {
+  def nodeRoutes: Route = pathPrefix("node") {
     path("list") {
       get {
         val listOfAllInstanceNodes = Future {
@@ -1027,7 +1029,7 @@ object Main extends App {
     }
   }
 
-  val appsettingRoutes : Route = pathPrefix("config") {
+  val appsettingRoutes: Route = pathPrefix("config") {
     path("ApplicationSettings") {
       post {
         entity(as[ApplicationSettings]) { appSettings =>
@@ -1511,9 +1513,9 @@ object Main extends App {
               filteredSite match {
                 case Some(siteInCache) =>
                   val instancesAfterSync = siteInCache.instances
-                  val beforeSyncInstanceIds = instancesBeforeSync.flatMap (instance => instance.instanceId).toSet
-                  val afterSyncInstanceIds = instancesAfterSync.flatMap (instance => instance.instanceId).toSet
-                  val commonInstanceIds = beforeSyncInstanceIds.intersect (afterSyncInstanceIds)
+                  val beforeSyncInstanceIds = instancesBeforeSync.flatMap(instance => instance.instanceId).toSet
+                  val afterSyncInstanceIds = instancesAfterSync.flatMap(instance => instance.instanceId).toSet
+                  val commonInstanceIds = beforeSyncInstanceIds.intersect(afterSyncInstanceIds)
                   val deletedInstances = instancesBeforeSync.filterNot {
                     instance =>
                       instance.instanceId.exists { id =>
@@ -1527,11 +1529,11 @@ object Main extends App {
                       }
                   }
                   val deltaStatus = if (deletedInstances.nonEmpty || addedInstances.nonEmpty) {
-                    SiteDeltaStatus.toDeltaStatus ("CHANGED")
+                    SiteDeltaStatus.toDeltaStatus("CHANGED")
                   } else {
-                    SiteDeltaStatus.toDeltaStatus ("UNCHANGED")
+                    SiteDeltaStatus.toDeltaStatus("UNCHANGED")
                   }
-                  Some(SiteDelta (site.id, deltaStatus, addedInstances, deletedInstances))
+                  Some(SiteDelta(site.id, deltaStatus, addedInstances, deletedInstances))
                 case None =>
                   logger.warn(s"could not get site from cache for siteId : $siteId")
                   None
@@ -1550,8 +1552,9 @@ object Main extends App {
       }
     }
   }
+
   // scalastyle:off method.length
-  def siteServices : Route = pathPrefix("site") {
+  def siteServices: Route = pathPrefix("site") {
     get {
       parameters('viewLevel.as[String]) {
         (viewLevel) =>
@@ -1559,7 +1562,7 @@ object Main extends App {
             logger.info("View level is..." + viewLevel)
             //Instead of applying map and flat operations at distinct  places,flatMap used directly though container holds only List[Nodes]
             //Use of map here produces results like List[Option[Site]] but List[Site1] would be better option for next operations.
-            Neo4jRepository.getNodesByLabel("Site1").flatMap{ siteNode =>
+            Neo4jRepository.getNodesByLabel("Site1").flatMap { siteNode =>
               Site1.fromNeo4jGraph(siteNode.getId).map {
                 siteObj => SiteViewFilter.filterInstance(siteObj, ViewLevel.toViewLevel(viewLevel))
 
@@ -1584,8 +1587,8 @@ object Main extends App {
           complete(StatusCodes.BadRequest, "Deletion failed")
       }
     }
-  } ~ path("site" / LongNumber/"instances"/ Segment) {
-    (siteId,instanceId) =>  {
+  } ~ path("site" / LongNumber / "instances" / Segment) {
+    (siteId, instanceId) => {
       delete {
         val mayBeDelete = Future {
           SiteManagerImpl.deleteIntanceFromSite(siteId, instanceId)
@@ -1598,16 +1601,16 @@ object Main extends App {
       }
     }
   } ~
-    path("site"/LongNumber/"policies"/Segment){
-      (siteId,policyId) => {
+    path("site" / LongNumber / "policies" / Segment) {
+      (siteId, policyId) => {
         delete {
           val maybeDelete = Future {
             SiteManagerImpl.deletePolicy(policyId)
           }
-          onComplete(maybeDelete){
-            case Success(executionStatus) => complete(StatusCodes.OK,executionStatus.msg)
-            case Failure(ex) => logger.info(s"Error while deleting policy $policyId",ex)
-              complete(StatusCodes.BadRequest,"Error while deleting policy")
+          onComplete(maybeDelete) {
+            case Success(executionStatus) => complete(StatusCodes.OK, executionStatus.msg)
+            case Failure(ex) => logger.info(s"Error while deleting policy $policyId", ex)
+              complete(StatusCodes.BadRequest, "Error while deleting policy")
           }
         }
       }
@@ -1823,35 +1826,35 @@ object Main extends App {
     }
   }
 
-  def populateFilteredInstances(siteId: Long,  filters: List[Filter]) : Option[Site1] = {
+  def populateFilteredInstances(siteId: Long, filters: List[Filter]): Option[Site1] = {
     val mayBeSite = cachedSite.get(siteId)
     mayBeSite match {
-      case Some (site) =>
+      case Some(site) =>
         val instances = site.instances
         val (siteFiltersToSave, filteredInstances) = if (filters.nonEmpty) {
           val siteFilters = site.filters
           val listOfSiteFilters = siteFilters.map {
-            siteFilter => SiteFilter (siteFilter.id, siteFilter.accountInfo, filters)
+            siteFilter => SiteFilter(siteFilter.id, siteFilter.accountInfo, filters)
           }
           val listOfInstances = instances.flatMap {
             instance =>
-              val filterExists = filters.find (filter => filterExistsInTags (instance, filter) )
-              filterExists.map (filter => instance)
+              val filterExists = filters.find(filter => filterExistsInTags(instance, filter))
+              filterExists.map(filter => instance)
           }
           (listOfSiteFilters, listOfInstances)
         }
         else {
           (site.filters, instances)
         }
-        val instancesToSave = getInstancesToSave (filteredInstances.toSet)
-        val lbsToSave = getLoadBalancersToSave (site.loadBalancers)
-        val sgsToSave = getScalingGroupsToSave (site.scalingGroups)
-        val rInstancesToSave = getReservedInstancesToSave (site.reservedInstanceDetails)
-        val siteToSave = Site1 (site.id, site.siteName, instancesToSave, rInstancesToSave, siteFiltersToSave, lbsToSave, sgsToSave, site.groupsList)
-        siteToSave.toNeo4jGraph (siteToSave)
-        cachedSite.put (siteId, siteToSave)
-        Some (siteToSave)
-      case None => logger.warn (s"could not get Site from cache for siteId : $siteId")
+        val instancesToSave = getInstancesToSave(filteredInstances.toSet)
+        val lbsToSave = getLoadBalancersToSave(site.loadBalancers)
+        val sgsToSave = getScalingGroupsToSave(site.scalingGroups)
+        val rInstancesToSave = getReservedInstancesToSave(site.reservedInstanceDetails)
+        val siteToSave = Site1(site.id, site.siteName, instancesToSave, rInstancesToSave, siteFiltersToSave, lbsToSave, sgsToSave, site.groupsList)
+        siteToSave.toNeo4jGraph(siteToSave)
+        cachedSite.put(siteId, siteToSave)
+        Some(siteToSave)
+      case None => logger.warn(s"could not get Site from cache for siteId : $siteId")
         None
     }
   }
@@ -1883,4 +1886,9 @@ object Main extends App {
     mayBeSite.isDefined
   }
 
+  def indexSite(site: Site1): Unit = {
+    val index = site.siteName
+    site.instances.foreach(instance => EsManager.indexEntity[Instance](instance, index, "instance"))
+    site.loadBalancers.foreach(loadBalancer => EsManager.indexEntity[LoadBalancer](loadBalancer, index, "lb"))
+  }
 }
