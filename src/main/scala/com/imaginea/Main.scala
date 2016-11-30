@@ -601,72 +601,72 @@ object Main extends App {
               complete(StatusCodes.BadRequest, "Unable to get tags")
           }
       }
-    } ~ path("keypairs" / LongNumber) { siteId =>
-      get {
-        val listOfKeyPairs = Future {
-          val mayBeSite = cachedSite.get(siteId)
+    }
+  } ~ path("keypairs" / LongNumber) { siteId =>
+    get {
+      val listOfKeyPairs = Future {
+        val mayBeSite = cachedSite.get(siteId)
+        mayBeSite match {
+          case Some(site) =>
+            val keyPairs = site.instances.flatMap { instance =>
+              instance.sshAccessInfo.map(x => x.keyPair)
+            }
+            Page[KeyPairInfo](keyPairs)
+          case None =>
+            logger.warn(s"Failed while doing fromNeo4jGraph of Site for siteId : $siteId")
+            Page[KeyPairInfo](List.empty[KeyPairInfo])
+        }
+      }
+      onComplete(listOfKeyPairs) {
+        case Success(successResponse) => complete(StatusCodes.OK, successResponse)
+        case Failure(ex) =>
+          logger.error(s"Unable to get List; Failed with ${ex.getMessage}", ex)
+          complete(StatusCodes.BadRequest, "Unable to get List of KeyPairs")
+      }
+    }
+  } ~ path("site" / LongNumber) { siteId =>
+    get {
+      parameter("type") { view =>
+        val filteredSite = Future {
+          val mayBeSite = Site1.fromNeo4jGraph(siteId)
           mayBeSite match {
             case Some(site) =>
-              val keyPairs = site.instances.flatMap { instance =>
-                instance.sshAccessInfo.map(x => x.keyPair)
+              val viewType = ViewType.toViewType(view)
+              val listOfFilteredInstances = site.instances.map { instance =>
+                viewType match {
+                  case OPERATIONS => filterInstanceViewOperations(instance, ViewLevel.toViewLevel("SUMMARY"))
+                  case ARCHITECTURE => filterInstanceViewArchitecture(instance, ViewLevel.toViewLevel("SUMMARY"))
+                  case LIST => filterInstanceViewList(instance, ViewLevel.toViewLevel("SUMMARY"))
+                }
+
               }
-              Page[KeyPairInfo](keyPairs)
+              Some(Site1(site.id, site.siteName, listOfFilteredInstances, site.reservedInstanceDetails,
+                site.filters, site.loadBalancers, site.scalingGroups, site.groupsList, site.groupBy))
             case None =>
               logger.warn(s"Failed while doing fromNeo4jGraph of Site for siteId : $siteId")
-              Page[KeyPairInfo](List.empty[KeyPairInfo])
+              None
           }
         }
-        onComplete(listOfKeyPairs) {
+        onComplete(filteredSite) {
           case Success(successResponse) => complete(StatusCodes.OK, successResponse)
           case Failure(ex) =>
-            logger.error(s"Unable to get List; Failed with ${ex.getMessage}", ex)
-            complete(StatusCodes.BadRequest, "Unable to get List of KeyPairs")
+            logger.error(s"Unable to get Filtered Site; Failed with ${ex.getMessage}", ex)
+            complete(StatusCodes.BadRequest, "Unable to get Filtered Site")
         }
       }
-    } ~ path("site" / LongNumber) { siteId =>
-      get {
-        parameter("type") { view =>
-          val filteredSite = Future {
-            val mayBeSite = Site1.fromNeo4jGraph(siteId)
-            mayBeSite match {
-              case Some(site) =>
-                val viewType = ViewType.toViewType(view)
-                val listOfFilteredInstances = site.instances.map { instance =>
-                  viewType match {
-                    case OPERATIONS => filterInstanceViewOperations(instance, ViewLevel.toViewLevel("SUMMARY"))
-                    case ARCHITECTURE => filterInstanceViewArchitecture(instance, ViewLevel.toViewLevel("SUMMARY"))
-                    case LIST => filterInstanceViewList(instance, ViewLevel.toViewLevel("SUMMARY"))
-                  }
-
-                }
-                Some(Site1(site.id, site.siteName, listOfFilteredInstances, site.reservedInstanceDetails,
-                  site.filters, site.loadBalancers, site.scalingGroups, site.groupsList, site.groupBy))
-              case None =>
-                logger.warn(s"Failed while doing fromNeo4jGraph of Site for siteId : $siteId")
-                None
-            }
-          }
-          onComplete(filteredSite) {
-            case Success(successResponse) => complete(StatusCodes.OK, successResponse)
-            case Failure(ex) =>
-              logger.error(s"Unable to get Filtered Site; Failed with ${ex.getMessage}", ex)
-              complete(StatusCodes.BadRequest, "Unable to get Filtered Site")
-          }
+    }
+  } ~ path("site" / "filter" / LongNumber) { siteId =>
+    put {
+      entity(as[SiteFilter]) { siteFilter =>
+        val filteredSite = Future {
+          val filters = siteFilter.filters
+          populateFilteredInstances(siteId, filters)
         }
-      }
-    } ~ path("site" / "filter" / LongNumber) { siteId =>
-      put {
-        entity(as[SiteFilter]) { siteFilter =>
-          val filteredSite = Future {
-            val filters = siteFilter.filters
-            populateFilteredInstances(siteId, filters)
-          }
-          onComplete(filteredSite) {
-            case Success(successResponse) => complete(StatusCodes.OK, successResponse)
-            case Failure(ex) =>
-              logger.error(s"Unable to populate Filtered Instances; Failed with ${ex.getMessage}", ex)
-              complete(StatusCodes.BadRequest, "Unable to populated Filtered Instances")
-          }
+        onComplete(filteredSite) {
+          case Success(successResponse) => complete(StatusCodes.OK, successResponse)
+          case Failure(ex) =>
+            logger.error(s"Unable to populate Filtered Instances; Failed with ${ex.getMessage}", ex)
+            complete(StatusCodes.BadRequest, "Unable to populated Filtered Instances")
         }
       }
     }
