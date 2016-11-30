@@ -3,20 +3,21 @@ package com.imaginea.activegrid.core.models
 import org.elasticsearch.common.settings.ImmutableSettings
 import org.elasticsearch.index.query.{BoolQueryBuilder, QueryBuilders}
 import org.elasticsearch.node.NodeBuilder
-import spray.json.{DefaultJsonProtocol, RootJsonFormat}
+import spray.json.RootJsonFormat
 
 import scala.collection.JavaConversions._
 
 /**
   * Created by nagulmeeras on 23/11/16.
   */
-object EsManager extends App with DefaultJsonProtocol {
+object EsManager {
   val settings = ImmutableSettings.settingsBuilder()
     .put("cluster.name", "elasticsearch")
     .put("node.name", this.getClass.getProtectionDomain.getCodeSource.getLocation.toURI.getPath + "/config/names.txt")
     .build()
   val node = NodeBuilder.nodeBuilder().local(false).settings(settings).build().start()
   val client = node.client()
+  val searchHitsSize = 1000
 
   def shutDown(): Unit = {
     node.stop.close()
@@ -25,12 +26,12 @@ object EsManager extends App with DefaultJsonProtocol {
   def indexEntity[T <: BaseEntity](entity: T, index: String, indexType: String)(implicit formateObj: RootJsonFormat[T]): Unit = {
     entity.id.foreach { id =>
       val v = formateObj.write(entity).toString()
-      client.prepareIndex(index, indexType, id.toString).setSource(v).execute().actionGet()
+      val respo = client.prepareIndex(index.toLowerCase, indexType, id.toString).setSource(v).execute().actionGet()
     }
   }
 
   def boolQuery(esSearchQuery: EsSearchQuery): List[EsSearchResponse] = {
-    val index = esSearchQuery.index
+    val index = esSearchQuery.index.toLowerCase
     val searchRequest = client.prepareSearch(index)
     searchRequest.addField(esSearchQuery.outputField)
     esSearchQuery.types.foreach(searchType => searchRequest.setTypes(searchType))
@@ -47,7 +48,7 @@ object EsManager extends App with DefaultJsonProtocol {
       }
     }
     searchRequest.setQuery(query)
-    searchRequest.setSize(1000)
+    searchRequest.setSize(searchHitsSize)
     val response = searchRequest.execute.actionGet
     response.getHits.foldLeft(List.empty[EsSearchResponse]) {
       (responses, hit) =>
@@ -63,19 +64,43 @@ object EsManager extends App with DefaultJsonProtocol {
     wildCardStr.toString
   }
 
-  //TODO Need to write custome json writer.
-  //  def fieldMappings(indexName : String , mappingType : String): List[String] = {
-  //    try {
-  //      val index = indexName.toLowerCase
-  //      val clusterState = client.admin().cluster().prepareState().setFilterIndices(index).execute().actionGet().getState
-  //      val metaData = Option(clusterState.getMetaData.index(index).mapping(mappingType))
-  //      metaData.map{data =>
-  //      }
-  //    }catch {
-  //      case ex: Exception => throw ex
-  //    }
-  //    List.empty
-  //  }
+  def fieldMappings(indexName: String, mappingType: String): Set[String] = {
+    val index = indexName.toLowerCase
+    val mayBeClusterState = Option(client.admin())
+      .flatMap(admin => Option(admin.cluster()))
+      .flatMap(cluster => Option(cluster.prepareState()))
+      .flatMap(state => Option(state.setFilterIndices(index)))
+      .flatMap(filter => Option(filter.execute()))
+      .flatMap(execution => Option(execution.actionGet()))
+      .flatMap(action => Option(action.getState))
+    //client.admin().cluster().prepareState().setFilterIndices(index).execute().actionGet().getState
+    val mayBeMapping = mayBeClusterState
+      .flatMap(clusterState => Option(clusterState.getMetaData))
+      .flatMap(metaData => Option(metaData.index(index)))
+      .flatMap(index => Option(index.mapping(mappingType)))
+    //getMetaData.index(index).mapping(mappingType)\
+    mayBeMapping match {
+      case Some(mapping) => flattenKeys(mapping.getSourceAsMap, mappingType).toSet
+      case None => Set.empty[String]
+    }
 
+  }
+
+  def flattenKeys(map: java.util.Map[String, AnyRef], parent: String): List[String] = {
+    if (map.contains("properties")) {
+      val properties = map("properties").asInstanceOf[java.util.Map[String, AnyRef]]
+      properties.flatMap {
+        case (key, value) =>
+          val interMap = value.asInstanceOf[java.util.Map[String, AnyRef]]
+          if (interMap.contains("dynamic")) {
+            flattenKeys(interMap, parent + "." + key)
+          } else {
+            List(parent)
+          }
+      }.toList
+    } else {
+      List(parent)
+    }
+  }
 
 }
